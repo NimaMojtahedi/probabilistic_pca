@@ -1,6 +1,26 @@
-# Probabilistic PCA vs Classical PCA
+# PPCA: Overview and Theoretical Comparison to PCA ✨
 
-This document provides a concise comparison between **Classical PCA** and **Probabilistic PCA (PPCA)**, highlighting their respective strengths, weaknesses, and use cases.
+<div align="center">
+
+[![Notebook](https://img.shields.io/badge/Notebook-Open-blue?logo=jupyter)](Probabilistic_PCA_inferpy.ipynb)
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#)
+[![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-FF6F00?logo=tensorflow&logoColor=white)](#)
+[![Edward](https://img.shields.io/badge/Edward-1.3%2B-4c9aff)](#)
+
+</div>
+
+_This repo accompanies the notebook `Probabilistic_PCA_inferpy.ipynb`. It compares Classical PCA and Probabilistic PCA (PPCA) at a theoretical level and explains how we estimate the number of components using a Dirichlet Process (DP) prior._
+
+**Quick links:** [Open the notebook](Probabilistic_PCA_inferpy.ipynb)
+
+---
+
+## Contents
+
+- [Classical PCA](#-classical-pca)
+- [Probabilistic PCA (PPCA)](#-probabilistic-pca-ppca)
+- [Estimating the number of components (Dirichlet Process)](#-estimating-the-number-of-components-with-a-dirichlet-process)
+- [Summary](#-summary)
 
 ---
 
@@ -34,7 +54,7 @@ This document provides a concise comparison between **Classical PCA** and **Prob
 * Latent variable Gaussian model:
 
   $$
-  x = Wz + \mu + \epsilon, \quad z \sim \mathcal{N}(0,I), \quad \epsilon \sim \mathcal{N}(0, \sigma^2I)
+  x = Wz + \mu + \epsilon, \quad z \\sim \mathcal{N}(0,I), \quad \epsilon \\sim \mathcal{N}(0, \sigma^2 I)
   $$
 * Parameters estimated via maximum likelihood, often with Expectation–Maximization (EM).
 
@@ -53,6 +73,18 @@ This document provides a concise comparison between **Classical PCA** and **Prob
 * Slightly more complex to implement and interpret.
 
 ---
+
+## 🧭 Estimating the number of components with a Dirichlet Process
+
+In the notebook, the effective dimensionality is inferred rather than fixed:
+
+- A Dirichlet Process prior with a truncated stick‑breaking construction places weights over up to K_max components. Inference (variational/EM) shrinks redundant components by driving their posterior weights toward zero.
+- The selected dimensionality is the count of components with non‑negligible posterior weight and loadings, yielding automatic model order selection without manual k tuning.
+- The concentration parameter (α) governs how readily new components are used; putting a hyperprior on α lets the data balance parsimony and flexibility.
+- Benefits: data‑driven complexity control, uncertainty over the effective k, and compatibility with PPCA’s handling of missing data.
+- Diagnostics: posterior stick lengths/weights, stabilization of σ², and improved held‑out predictive likelihood.
+
+For strictly single‑subspace structure, Bayesian PCA with ARD can similarly prune unused components; the DP approach extends naturally to multi‑modal or heterogeneous latent structure.
 
 ## ⚖️ Summary
 
