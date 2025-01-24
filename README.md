@@ -1,94 +1,250 @@
-# PPCA: Overview and Theoretical Comparison to PCA ✨
+
+# Probabilistic Factor Models (Demo): PPCA & NMF with Dirichlet-Process Shrinkage
 
 <div align="center">
 
-[![Notebook](https://img.shields.io/badge/Notebook-Open-blue?logo=jupyter)](Probabilistic_PCA_inferpy.ipynb)
+[![Notebook: Video Demo](https://img.shields.io/badge/Notebook-Video%20(AVI)-blue?logo=jupyter)](dp_factor_video_demo.ipynb)
+[![Notebook: Legacy (InferPy/TF)](https://img.shields.io/badge/Notebook-Legacy%20(InferPy%2FTF)-lightgrey?logo=jupyter)](Probabilistic_PCA_inferpy.ipynb)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#)
-[![TensorFlow](https://img.shields.io/badge/TensorFlow-2.x-FF6F00?logo=tensorflow&logoColor=white)](#)
-[![Edward](https://img.shields.io/badge/Edward-1.3%2B-4c9aff)](#)
+[![PyMC](https://img.shields.io/badge/PyMC-%E2%89%A55-0b7a75)](#)
 
 </div>
 
-_This repo accompanies the notebook `Probabilistic_PCA_inferpy.ipynb`. It compares Classical PCA and Probabilistic PCA (PPCA) at a theoretical level and explains how we estimate the number of components using a Dirichlet Process (DP) prior._
+**TL;DR.** This demo repo provides **Probabilistic PCA (PPCA)** and **Nonnegative Matrix Factorization (NMF)** under a **Gaussian noise model**, with the number of components selected **automatically** via a **truncated Dirichlet-Process (DP) stick-breaking** prior.  
+For NMF, you can optionally enable **Gamma priors** and **temporal smoothing** (Gaussian Random Walk on temporal weights with softplus).  
+A hands-on notebook shows how to apply both models to **2D-in-time `.avi` video** data (shape `H×W×T`) and visualize **spatial components** and **temporal weights**.
 
-**Quick links:** [Open the notebook](Probabilistic_PCA_inferpy.ipynb)
+> **Legacy preserved.** The original TensorFlow/InferPy notebook is kept as-is for historical comparison:  
+> `Probabilistic_PCA_inferpy.ipynb`.
 
 ---
 
 ## Contents
 
-- [Classical PCA](#-classical-pca)
-- [Probabilistic PCA (PPCA)](#-probabilistic-pca-ppca)
-- [Estimating the number of components (Dirichlet Process)](#-estimating-the-number-of-components-with-a-dirichlet-process)
-- [Summary](#-summary)
+- [Quickstart (5 min)](#quickstart-5-min)
+- [Notebooks & Demos](#notebooks--demos)
+- [API at a Glance](#api-at-a-glance)
+- [Educational Guide](#educational-guide)
+  - [📊 Classical PCA](#-classical-pca)
+  - [📈 Probabilistic PCA (PPCA)](#-probabilistic-pca-ppca)
+  - [🧩 Nonnegative Matrix Factorization (NMF)](#-nonnegative-matrix-factorization-nmf)
+  - [🧭 Estimating Components with a Dirichlet Process](#-estimating-components-with-a-dirichlet-process)
+  - [When to Use What](#when-to-use-what)
+- [Diagnostics & Practical Tips](#diagnostics--practical-tips)
+- [FAQ & Exercises](#faq--exercises)
+- [References](#references)
 
 ---
 
-## 📊 Classical PCA
+## Quickstart (5 min)
 
-**Formulation:**
+```bash
+pip install "pymc>=5.10" arviz numpy matplotlib
+# optional speedups:
+pip install "jax[cpu]" numpyro
+# for the video demo:
+pip install opencv-python
+````
+
+Minimal usage:
+
+```python
+import numpy as np
+from dp_factor_models import fit_ppca_dp, fit_nmf_dp
+
+# Example data (N samples × D features)
+N, D = 300, 50
+X = np.abs(np.random.randn(N, D))  # NMF needs nonnegativity; PPCA will center internally
+
+# PPCA with DP shrinkage
+ppca = fit_ppca_dp(X, K_max=12, alpha=2.0, draws=600, tune=600, chains=2, target_accept=0.9)
+print("PPCA effective K:", ppca.effective_K, "RMSE:", round(ppca.recon_rmse, 4))
+
+# NMF with DP shrinkage + options
+nmf = fit_nmf_dp(
+    X,
+    K_max=12, alpha=2.0, draws=600, tune=600, chains=2, target_accept=0.9,
+    use_gamma_priors=True,        # toggleable
+    temporal_smoothing=False      # toggleable; True assumes rows=time (W is temporal)
+)
+print("NMF effective K:", nmf.effective_K, "RMSE:", round(nmf.recon_rmse, 4))
+```
+
+---
+
+## Notebooks & Demos
+
+* **Video (AVI) demo:** [`dp_factor_video_demo.ipynb`](dp_factor_video_demo.ipynb)
+  Loads `(H, W, T)`, reshapes to `(features=H×W, samples=T)`, fits **DP-PPCA** & **DP-NMF**, then plots:
+
+  * **Spatial components** (2D images) and **temporal weights** (time series), ranked by posterior mean DP weight.
+* **Legacy comparison:** [`Probabilistic_PCA_inferpy.ipynb`](Probabilistic_PCA_inferpy.ipynb)
+  PPCA (InferPy/TF). Kept unchanged for historical context.
+
+---
+
+## API at a Glance
+
+### `fit_ppca_dp(X, K_max=10, alpha=2.0, draws=1000, tune=1000, chains=2, seed=42, target_accept=0.9, component_threshold=0.02, ...)`
+
+* **Input:** `X` is `(N, D)` (columns are centered internally).
+* **Noise:** Gaussian. **DP stick-breaking** scales component columns, shrinking redundant factors.
+* **Returns:** `PPCAResult` with:
+
+  * `idata` (ArviZ `InferenceData`),
+  * `X_mean_posterior` (N×D),
+  * `pi_mean` (stick weights),
+  * `effective_K`,
+  * `recon_rmse`.
+
+### `fit_nmf_dp(X, K_max=10, alpha=2.0, draws=1000, tune=1000, chains=2, seed=123, target_accept=0.9, component_threshold=0.02, *, use_gamma_priors=False, temporal_smoothing=False, rw_sigma_scale=0.3, gamma_shape_w=2.0, gamma_rate_w=2.0, gamma_shape_h=2.0, gamma_rate_h=2.0)`
+
+* **Input:** `X` is `(N, D)` and **nonnegative**.
+* **Options:**
+
+  * `use_gamma_priors`: use Gamma(shape, rate) for **H** and (if no smoothing) **W**; otherwise HalfNormal.
+  * `temporal_smoothing`: model **W** (rows=time) with a **GaussianRandomWalk** per component → softplus → ≥0 → DP shrink.
+  * `rw_sigma_scale`: HalfNormal prior scale on RW σ; smaller ⇒ smoother time courses.
+* **Returns:** `NMFResult` with `idata`, `X_mean_posterior` (N×D), `pi_mean`, `effective_K`, `recon_rmse`.
+
+> **Spatial vs temporal mapping**
+>
+> * **PPCA:** `W` (D×K) ≈ spatial maps; `Z` (N×K) ≈ temporal weights (available in `idata.posterior`).
+> * **NMF:** `H` (K×D) → spatial (reshape to H×W); `W` (N×K) → temporal.
+
+---
+
+## Educational Guide
+
+This integrates and extends your original theoretical notes to be concise and practice-oriented.
+
+### 📊 Classical PCA
+
+**Formulation**
 
 * Algebraic method that finds orthogonal directions (principal components) maximizing variance.
 * Solved via eigenvalue decomposition (covariance matrix) or singular value decomposition (SVD).
 
-**✅ Pros:**
+**✅ Pros**
 
-* Computationally efficient (closed-form solution).
+* Computationally efficient (closed-form).
 * Deterministic and stable.
-* Simple geometric intuition, easy to interpret.
-* Ubiquitous in libraries and workflows.
+* Simple geometric intuition, widely available.
 
-**⚠️ Cons:**
+**⚠️ Cons**
 
-* No explicit probabilistic model or uncertainty estimates.
-* Sensitive to outliers and noise.
+* No explicit probabilistic model or uncertainty.
+* Sensitive to outliers/noise.
 * Cannot handle missing data directly.
-* Hard to extend into Bayesian or generative frameworks.
+* Hard to extend into Bayesian/generative frameworks.
 
 ---
 
-## 📈 Probabilistic PCA (PPCA)
+### 📈 Probabilistic PCA (PPCA)
 
-**Formulation:**
+**Model (Gaussian latent variable)**
+[
+x = W z + \mu + \epsilon,\quad z \sim \mathcal{N}(0,I),\quad \epsilon \sim \mathcal{N}(0,\sigma^2 I).
+]
 
-* Latent variable Gaussian model:
+**✅ Pros**
 
-  $$
-  x = Wz + \mu + \epsilon, \quad z \\sim \mathcal{N}(0,I), \quad \epsilon \\sim \mathcal{N}(0, \sigma^2 I)
-  $$
-* Parameters estimated via maximum likelihood, often with Expectation–Maximization (EM).
+* Explicit Gaussian noise model → robustness to noise.
+* Likelihood-based → model selection & statistical testing.
+* Naturally handles missing data.
+* Posterior over latent variables (uncertainty).
+* Foundation for Bayesian PCA, mixtures of PPCA, factor analyzers, VAEs.
 
-**✅ Pros:**
+**⚠️ Cons**
 
-* Explicit Gaussian noise model → more robust to noise.
-* Likelihood-based → enables model selection and statistical testing.
-* Naturally handles missing data via EM inference.
-* Provides posterior distributions over latent variables (uncertainty quantification).
-* Forms the foundation for Bayesian PCA, mixtures of PPCA, factor analyzers, and modern deep latent variable models (e.g., VAEs).
-
-**⚠️ Cons:**
-
-* More computationally expensive than classical PCA.
-* Assumes Gaussian noise, limiting robustness for non-Gaussian data.
-* Slightly more complex to implement and interpret.
+* More compute than PCA.
+* Assumes Gaussian noise.
+* Slightly more complex to implement/interpret.
 
 ---
 
-## 🧭 Estimating the number of components with a Dirichlet Process
+### 🧩 Nonnegative Matrix Factorization (NMF)
 
-In the notebook, the effective dimensionality is inferred rather than fixed:
+**Model (Gaussian likelihood in this repo)**
+Approximate (X \approx W H) with (W \ge 0), (H \ge 0). Encourages **parts-based**, additive structure.
 
-- A Dirichlet Process prior with a truncated stick‑breaking construction places weights over up to K_max components. Inference (variational/EM) shrinks redundant components by driving their posterior weights toward zero.
-- The selected dimensionality is the count of components with non‑negligible posterior weight and loadings, yielding automatic model order selection without manual k tuning.
-- The concentration parameter (α) governs how readily new components are used; putting a hyperprior on α lets the data balance parsimony and flexibility.
-- Benefits: data‑driven complexity control, uncertainty over the effective k, and compatibility with PPCA’s handling of missing data.
-- Diagnostics: posterior stick lengths/weights, stabilization of σ², and improved held‑out predictive likelihood.
+**Options provided**
 
-For strictly single‑subspace structure, Bayesian PCA with ARD can similarly prune unused components; the DP approach extends naturally to multi‑modal or heterogeneous latent structure.
+* **Gamma priors** (shape-rate) for stronger positivity/sparsity bias.
+* **Temporal smoothing** on **W** (rows=time) via a **Gaussian Random Walk** with **softplus** to enforce nonnegativity → smooth, interpretable time courses for videos/neural data.
 
-## ⚖️ Summary
+---
 
-* **Use Classical PCA** when you want **speed, simplicity, and interpretability** (e.g., preprocessing, visualization, exploratory data analysis).
-* **Use PPCA** when you need a **generative probabilistic model**, want to **handle missing data**, or plan to **extend to Bayesian or mixture models**.
+### 🧭 Estimating Components with a Dirichlet Process
 
+This demo infers effective dimensionality rather than fixing (k):
+
+* Place a **Dirichlet Process** prior using a **truncated stick-breaking** construction over up to (K_{\max}) components.
+* Draw (v_k \sim \mathrm{Beta}(1,\alpha)) for (k=1,\dots,K_{\max}-1) and construct:
+  [
+  \pi_1 = v_1,\quad \pi_k = v_k \prod_{j<k}(1-v_j),\quad \pi_{K_{\max}} = \prod_{j=1}^{K_{\max}-1}(1-v_j).
+  ]
+* Scale each component column by (\sqrt{\pi_k}). Inference shrinks redundant components by driving their weights toward zero.
+* **Selected dimensionality** is the count of components with non-negligible posterior weight (e.g., (\mathbb{E}[\pi_k]>\tau), (\tau\approx 0.02)).
+* **(\alpha)** controls parsimony: smaller → stronger shrinkage to early components; larger → more active components.
+
+**Benefits**
+
+* Data-driven complexity control.
+* Uncertainty over effective (k).
+* Compatible with PPCA’s missing-data handling.
+
+> For strictly single-subspace structure, ARD in Bayesian PCA can similarly prune components; DP shrinkage generalizes naturally to heterogeneous latent structure.
+
+---
+
+### When to Use What
+
+| Goal / Data Need                        | Recommended                       |
+| --------------------------------------- | --------------------------------- |
+| Fast, deterministic reduction           | **Classical PCA**                 |
+| Probabilistic model, missing data       | **PPCA (Gaussian)**               |
+| Parts-based spatial maps + time courses | **NMF (Gaussian)**                |
+| Smooth temporal weights (rows=time)     | **NMF + temporal_smoothing=True** |
+| Stronger positivity/sparsity            | **NMF + use_gamma_priors=True**   |
+| Avoid hand-tuning (k)                   | **PPCA/NMF + DP stick-breaking**  |
+
+---
+
+## Diagnostics & Practical Tips
+
+* **Effective K:** sort `pi_mean` and count weights above (\tau\in[0.01,0.05]).
+* **Sampler health:** if divergences occur, raise `target_accept` to `0.9–0.95`, reduce `K_max`, or enable JAX/NumPyro.
+* **Large videos (e.g., `250×250×1000`):** ROI crop, patchify, or frame-subsample; `temporal_smoothing=True` stabilizes W.
+* **Identifiability:** factor models have scale/rotation ambiguities—prioritize subspaces, recon error, and replicate stability.
+
+---
+
+## FAQ & Exercises
+
+**Q:** Why Gaussian noise for NMF here?
+**A:** This demo targets real-valued intensities. For counts, Poisson or Negative Binomial are natural extensions.
+
+**Q:** How should I set (\alpha) (DP concentration)?
+**A:** Start with `1–3`. Smaller → fewer active components; larger → more diffuse usage.
+
+<details><summary><b>Exercise 1 (solution hidden): Recover rank on synthetic data</b></summary>
+
+Generate rank-4 data, run `fit_ppca_dp(X, K_max=12)`, and verify `effective_K ≈ 4` via `pi_mean`.
+
+</details>
+
+<details><summary><b>Exercise 2: Smooth vs non-smooth time courses</b></summary>
+
+On video data, toggle `temporal_smoothing=True` and sweep `rw_sigma_scale` from `0.5 → 0.2`. Compare temporal plots and reconstruction RMSE.
+
+</details>
+
+---
+
+## References
+
+* Tipping & Bishop (1999). *Probabilistic PCA*. **JRSS-B**.
+* Blei & Jordan (2006). *Variational Inference for the Dirichlet Process*.
+* Lee & Seung (1999). *Learning the parts of objects by non-negative matrix factorization*.
 
