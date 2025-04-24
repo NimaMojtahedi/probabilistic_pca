@@ -290,7 +290,7 @@ def fit_nmf_dp(
         X_mean = pm.Deterministic("X_mean", W @ H)
         pm.Normal("X_obs", mu=X_mean, sigma=sigma_noise, observed=X)
 
-        pm.random.seed(seed)
+        # pm.random.seed(seed)
         idata = _maybe_sample(draws=draws, tune=tune, chains=chains, target_accept=target_accept)
 
     X_mean_post = idata.posterior["X_mean"].mean(dim=("chain", "draw")).to_numpy()
